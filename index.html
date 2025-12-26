@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Dice Pro - Fixed</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a2e; }
+        canvas { display: block; }
+        #ui {
+            position: absolute; bottom: 10%; left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none; z-index: 10;
+        }
+        #result {
+            font-family: 'Arial Black', sans-serif; font-size: 80px;
+            color: white; text-shadow: 0 0 20px rgba(0,0,0,0.5);
+            opacity: 0; transform: scale(0);
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .instruction {
+            position: absolute; top: 20px; width: 100%;
+            text-align: center; color: white; font-family: sans-serif;
+            text-transform: uppercase; letter-spacing: 2px; opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+
+<div class="instruction">Натисніть, щоб кинути кубик</div>
+<div id="ui"><div id="result"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+<script>
+    let scene, camera, renderer, dice;
+    let isRolling = false;
+    const resultEl = document.getElementById('result');
+
+    // Чисті кути для граней (Three.js використовує радіани)
+    const faceRotations = {
+        1: { x: 0, y: 0 },
+        6: { x: Math.PI, y: 0 },
+        2: { x: 0, y: -Math.PI/2 },
+        5: { x: 0, y: Math.PI/2 },
+        3: { x: -Math.PI/2, y: 0 },
+        4: { x: Math.PI/2, y: 0 }
+    };
+
+    function createDiceFace(number) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+
+        // Фон грані
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 256, 256);
+        
+        // Малюємо рамку (заокруглення візуальне)
+        ctx.strokeStyle = '#cccccc';
+        ctx.lineWidth = 15;
+        ctx.strokeRect(0, 0, 256, 256);
+
+        // Крапки
+        ctx.fillStyle = '#111111';
+        const dots = {
+            1: [[128, 128]],
+            2: [[70, 70], [186, 186]],
+            3: [[64, 64], [128, 128], [192, 192]],
+            4: [[70, 70], [186, 70], [70, 186], [186, 186]],
+            5: [[70, 70], [186, 70], [128, 128], [70, 186], [186, 186]],
+            6: [[70, 70], [186, 70], [70, 128], [186, 128], [70, 186], [186, 186]]
+        };
+
+        dots[number].forEach(pos => {
+            ctx.beginPath();
+            ctx.arc(pos[0], pos[1], 25, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    function init() {
+        scene = new THREE.Scene();
+        
+        // Камера: Зміщуємо вгору і назад, щоб бачити під кутом
+        camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 8); 
+        camera.lookAt(0, 0, 0);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // Матеріали (порядок в BoxGeometry: +x, -x, +y, -y, +z, -z)
+        // Відповідає цифрам: 5, 2, 4, 3, 1, 6
+        const materials = [
+            new THREE.MeshPhongMaterial({ map: createDiceFace(5) }),
+            new THREE.MeshPhongMaterial({ map: createDiceFace(2) }),
+            new THREE.MeshPhongMaterial({ map: createDiceFace(4) }),
+            new THREE.MeshPhongMaterial({ map: createDiceFace(3) }),
+            new THREE.MeshPhongMaterial({ map: createDiceFace(1) }),
+            new THREE.MeshPhongMaterial({ map: createDiceFace(6) })
+        ];
+        
+        const geometry = new THREE.BoxGeometry(2, 2, 2);
+        dice = new THREE.Mesh(geometry, materials);
+        scene.add(dice);
+
+        // Освітлення
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const light = new THREE.DirectionalLight(0xffffff, 0.6);
+        light.position.set(10, 10, 10);
+        scene.add(light);
+
+        window.addEventListener('mousedown', rollDice);
+        window.addEventListener('touchstart', rollDice);
+        animate();
+    }
+
+    function rollDice() {
+        if (isRolling) return;
+        
+        isRolling = true;
+        resultEl.style.opacity = "0";
+        resultEl.style.transform = "scale(0)";
+
+        const result = Math.floor(Math.random() * 6) + 1;
+        const targetRotation = faceRotations[result];
+
+        // Кількість повних обертів для "довгого" ефекту
+        const extraSpins = 5; 
+
+        // Анімація підстрибування
+        gsap.to(dice.position, {
+            y: 3, duration: 0.8, ease: "power2.out", yoyo: true, repeat: 1
+        });
+
+        // Анімація обертання
+        gsap.to(dice.rotation, {
+            x: targetRotation.x + (Math.PI * 2 * extraSpins),
+            y: targetRotation.y + (Math.PI * 2 * extraSpins),
+            z: Math.PI * 2, // Додаємо трохи хаосу по Z
+            duration: 2.5, // Збільшено тривалість
+            ease: "expo.out",
+            onComplete: () => {
+                isRolling = false;
+                resultEl.innerText = result;
+                resultEl.style.opacity = "1";
+                resultEl.style.transform = "scale(1)";
+                
+                // Скидаємо rotation до чистих значень, щоб уникнути накопичення помилок
+                dice.rotation.set(targetRotation.x, targetRotation.y, 0);
+            }
+        });
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    init();
+</script>
+</body>
+</html>
